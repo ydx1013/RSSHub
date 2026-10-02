@@ -26,10 +26,12 @@ interface ChapterMeta {
 }
 
 export const route: Route = {
-    path: '/',
+    path: '/:limit?',
     categories: ['programming'],
     example: '/figureya',
-    parameters: undefined,
+    parameters: {
+        limit: '条目数量上限，默认 `30`；因 CF Workers 免费版限制单请求子请求数（≤50），最大 `45`',
+    },
     features: {
         requireConfig: false,
         requirePuppeteer: false,
@@ -94,7 +96,7 @@ async function fetchChapterMeta(chapter: Chapter): Promise<ChapterMeta> {
     };
 }
 
-async function handler(): Promise<{
+async function handler(ctx: Context): Promise<{
     title: string;
     link: string;
     description: string;
@@ -110,18 +112,23 @@ async function handler(): Promise<{
         guid?: string;
     }>;
 }> {
+    // CF Workers free plan allows at most 50 subrequests per invocation; chapters.json uses one.
+    const limit = Math.min(Math.max(Number.parseInt(ctx.req.param('limit') ?? '', 10) || 30, 1), 45);
+
     const { data: chapters } = await got(`${HOST}/chapters.json`);
     const list: Chapter[] = chapters;
 
     // Keep the first entry of each folder as the representative module page.
     const seenFolders = new Set<string>();
-    const modules = list.filter((chapter) => {
-        if (seenFolders.has(chapter.folder)) {
-            return false;
-        }
-        seenFolders.add(chapter.folder);
-        return true;
-    });
+    const modules = list
+        .filter((chapter) => {
+            if (seenFolders.has(chapter.folder)) {
+                return false;
+            }
+            seenFolders.add(chapter.folder);
+            return true;
+        })
+        .slice(0, limit);
 
     // Fetch plain-text metadata in small batches to limit concurrency.
     const batchSize = 20;
