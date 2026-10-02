@@ -98,7 +98,7 @@ async function handler(): Promise<{
     title: string;
     link: string;
     description: string;
-    item: {
+    item: Array<{
         title: string;
         link: string;
         description: string;
@@ -108,7 +108,7 @@ async function handler(): Promise<{
         enclosure_url?: string;
         enclosure_type?: string;
         guid?: string;
-    }[];
+    }>;
 }> {
     const { data: chapters } = await got(`${HOST}/chapters.json`);
     const list: Chapter[] = chapters;
