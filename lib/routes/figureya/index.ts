@@ -83,6 +83,9 @@ async function fetchChapterMeta(chapter: Chapter): Promise<ChapterMeta> {
         };
     });
 
+    // cache.tryGet serializes values to JSON, so a cached `date` comes back as an ISO string.
+    const date = meta.date ? new Date(meta.date) : undefined;
+
     const thumbUrl = chapter.thumb ? `${HOST}/${chapter.thumb}` : undefined;
     const description = `${thumbUrl ? `<img src="${thumbUrl}"><br>` : ''}${meta.excerpt}`;
 
@@ -90,7 +93,7 @@ async function fetchChapterMeta(chapter: Chapter): Promise<ChapterMeta> {
         title: chapter.folder,
         link,
         thumbUrl,
-        date: meta.date,
+        date,
         author: meta.author,
         description,
     };
