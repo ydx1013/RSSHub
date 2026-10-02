@@ -30,7 +30,7 @@ export const route: Route = {
     categories: ['programming'],
     example: '/figureya',
     parameters: {
-        limit: '条目数量上限，默认 `30`；因 CF Workers 免费版限制单请求子请求数（≤50），最大 `45`',
+        limit: '条目数量上限，默认 `10`；因 CF Workers 免费版限制单请求子请求数（≤50），最大 `45`',
     },
     features: {
         requireConfig: false,
@@ -63,11 +63,10 @@ function extractDate(text: string): Date | undefined {
     return match ? timezone(parseDate(match[1], 'YYYY-MM-DD'), 8) : undefined;
 }
 
-// Build a short plain-text excerpt from the tutorial text, skipping the header block.
-function buildExcerpt(text: string, maxLength = 1000): string {
+// Build the full plain-text content, skipping the header block (title/author/date/TOC).
+function buildContent(text: string): string {
     const requirementIndex = text.search(/需求描述\s*Requirement/);
-    const excerpt = (requirementIndex > 0 ? text.slice(requirementIndex) : text).trim();
-    return excerpt.length > maxLength ? `${excerpt.slice(0, maxLength)}...` : excerpt;
+    return (requirementIndex > 0 ? text.slice(requirementIndex) : text).trim();
 }
 
 async function fetchChapterMeta(chapter: Chapter): Promise<ChapterMeta> {
@@ -79,7 +78,7 @@ async function fetchChapterMeta(chapter: Chapter): Promise<ChapterMeta> {
         return {
             author: extractAuthor(content),
             date: extractDate(content),
-            excerpt: buildExcerpt(content),
+            excerpt: buildContent(content),
         };
     });
 
@@ -116,7 +115,7 @@ async function handler(ctx: Context): Promise<{
     }>;
 }> {
     // CF Workers free plan allows at most 50 subrequests per invocation; chapters.json uses one.
-    const limit = Math.min(Math.max(Number.parseInt(ctx.req.param('limit') ?? '', 10) || 30, 1), 45);
+    const limit = Math.min(Math.max(Number.parseInt(ctx.req.param('limit') ?? '', 10) || 10, 1), 45);
 
     const { data: chapters } = await got(`${HOST}/chapters.json`);
     const list: Chapter[] = chapters;
