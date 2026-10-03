@@ -88,7 +88,10 @@ async function handler(ctx: Context) {
                 const content = $article('.article');
                 content.find('img').each((_, el) => {
                     const src = $(el).attr('src');
-                    if (src) {
+                    // Data-URI images (huge base64 payloads) bloat the feed and break readers; drop them
+                    if (!src || src.startsWith('data:')) {
+                        $(el).remove();
+                    } else {
                         $(el).attr('src', new URL(src, `${HOST}/`).href);
                     }
                 });
