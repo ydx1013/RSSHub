@@ -41,6 +41,15 @@ const parseNumber = (value: string | undefined): number | undefined => {
 
 const formatPercent = (value: number | undefined): string => (value === undefined ? '-' : `${value.toFixed(2)}%`);
 
+// Buffer covering settlement lag (2 trading days) and NAV drift between signal and execution
+const arbitrageBuffer = 0.5;
+// Minimum turnover in 万元: below this the spread cannot be executed without significant slippage
+const minVolume = 50;
+
+const parseFeePct = (value: string | undefined): number => parseNumber(value?.replace('%', '')) ?? 0;
+
+const parseVolume = (value: string | undefined): number => parseNumber(value) ?? 0;
+
 // Premium rate relative to intraday estimate when available, otherwise to latest NAV
 const calcPremiumRate = (cell: LofCell): number | undefined => {
     const price = parseNumber(cell.price);
@@ -53,24 +62,36 @@ const calcPremiumRate = (cell: LofCell): number | undefined => {
     return ((price - benchmark) / benchmark) * 100;
 };
 
+// Determine executable arbitrage direction: fee-aware premium/discount thresholds + open status + liquidity
+const getArbitrageSide = (cell: LofCell, premiumRate: number | undefined): 'premium' | 'discount' | undefined => {
+    if (premiumRate === undefined || parseVolume(cell.volume) < minVolume) {
+        return undefined;
+    }
+    if (premiumRate >= parseFeePct(cell.apply_fee) + arbitrageBuffer && (cell.apply_status ?? '').includes('开放')) {
+        return 'premium';
+    }
+    if (premiumRate <= -(parseFeePct(cell.redeem_fee) + arbitrageBuffer) && (cell.redeem_status ?? '').includes('开放')) {
+        return 'discount';
+    }
+    return undefined;
+};
+
 const buildArbitrageTip = (cell: LofCell, premiumRate: number | undefined): string => {
     if (premiumRate === undefined) {
         return '暂无折溢价数据';
     }
-    const redeemFeeTips = (cell.redeem_fee ?? '').includes('1.5')
-        ? '赎回费按持有期阶梯计费，持有不足 7 天通常收 1.50%，套利前请确认费率档位'
-        : `赎回费 ${cell.redeem_fee}`;
-    if (premiumRate >= 2) {
+    const redeemFeeTips = (cell.redeem_fee ?? '').includes('1.5') ? '赎回费按持有期阶梯计费，持有不足 7 天通常收 1.50%，套利前请确认费率档位' : `赎回费 ${cell.redeem_fee}`;
+    if (getArbitrageSide(cell, premiumRate) === 'premium') {
         return `溢价 ${formatPercent(premiumRate)}：存在溢价套利空间——场内申购（费率 ${cell.apply_fee}），确认到账后场内卖出。前提：${cell.apply_status}；注意申购费与 2 个交易日左右的到账时滞，期间净值波动可能吞噬价差。${redeemFeeTips}`;
     }
-    if (premiumRate <= -1) {
+    if (getArbitrageSide(cell, premiumRate) === 'discount') {
         return `折价 ${formatPercent(premiumRate)}：存在折价套利空间——场内买入后赎回（赎回费 ${cell.redeem_fee}）。前提：${cell.redeem_status}；注意赎回款 T+N 到账的时滞风险。`;
     }
     return `折溢价 ${formatPercent(premiumRate)}：扣除费率与时间成本后暂无明显套利空间`;
 };
 
 const buildDescription = (cell: LofCell, premiumRate: number | undefined): string => {
-    const rows: [string, string][] = [
+    const rows: Array<[string, string]> = [
         ['场内价格', `${cell.price}（${cell.price_dt}，涨跌 ${cell.increase_rt}%）`],
         ['单位净值', `${cell.fund_nav}（${cell.nav_dt}）`],
         ['实时估值', cell.estimate_value && cell.estimate_value !== '-' ? `${cell.estimate_value}（${cell.est_val_dt}）` : '无'],
@@ -88,8 +109,8 @@ const buildDescription = (cell: LofCell, premiumRate: number | undefined): strin
     return `<table style="border-collapse:collapse;">${tableRows}</table><p>${buildArbitrageTip(cell, premiumRate)}</p>`;
 };
 
-const fetchList = (listUrl: string): Promise<{ rows: { cell: LofCell }[]; total?: number }> =>
-    cache.tryGet(listUrl, async () => ofetch(`${rootUrl}${listUrl}/`, { headers: { Referer: `${rootUrl}/data/lof/` } }), 300) as Promise<{ rows: { cell: LofCell }[]; total?: number }>;
+const fetchList = (listUrl: string): Promise<{ rows: Array<{ cell: LofCell }>; total?: number }> =>
+    cache.tryGet(listUrl, async () => ofetch(`${rootUrl}${listUrl}/`, { headers: { Referer: `${rootUrl}/data/lof/` } }), 300) as Promise<{ rows: Array<{ cell: LofCell }>; total?: number }>;
 
 export const route: Route = {
     path: '/lof/:type?',
@@ -110,7 +131,7 @@ export const route: Route = {
     handler: async (ctx: Context): Promise<Data> => {
         const type = ctx.req.param('type') ?? 'all';
 
-        const targets: { type: string; listUrl: string }[] = [
+        const targets: Array<{ type: string; listUrl: string }> = [
             { type: 'index', listUrl: '/data/lof/index_lof_list' },
             { type: 'stock', listUrl: '/data/lof/stock_lof_list' },
         ];
@@ -119,7 +140,7 @@ export const route: Route = {
         const responses = await Promise.all(selected.map((t) => fetchList(t.listUrl)));
         const cells = responses.flatMap((res) => res.rows.map((row) => row.cell));
 
-        const scored = cells.map((cell) => ({ cell, premiumRate: calcPremiumRate(cell) }));
+        const scored = cells.map((cell) => ({ cell, premiumRate: calcPremiumRate(cell) })).filter(({ cell, premiumRate }) => getArbitrageSide(cell, premiumRate) !== undefined);
         scored.sort((a, b) => Math.abs(b.premiumRate ?? 0) - Math.abs(a.premiumRate ?? 0));
 
         const items: DataItem[] = scored.map(({ cell, premiumRate }) => {
@@ -137,9 +158,10 @@ export const route: Route = {
         return {
             title: '集思录 - LOF 套利数据',
             link: `${rootUrl}/data/lof/`,
-            description: `集思录 LOF 折溢价套利数据（${type === 'all' ? '全部' : type === 'index' ? '指数' : '股混'}），按折溢价绝对值排序。折溢价率基于实时估值，无估值时基于最新单位净值（T-1），未计费率成本。`,
+            description: `集思录 LOF 套利数据（${type === 'all' ? '全部' : type === 'index' ? '指数' : '股混'}），仅保留有实际套利空间的品种：折溢价覆盖费率并留 0.5% 缓冲、申赎状态开放、成交额 ≥ ${minVolume} 万元，按折溢价绝对值排序。折溢价率基于实时估值，无估值时基于最新单位净值（T-1）。`,
             item: items,
-            allowEmpty: false,
+            // Filter can legitimately yield zero actionable items on calm days
+            allowEmpty: true,
         };
     },
 };
