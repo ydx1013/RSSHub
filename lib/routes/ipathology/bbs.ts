@@ -131,7 +131,9 @@ async function handler(ctx: Context) {
                               .join('')}`
                         : '';
 
-                    const author = $d('.dis_one_l').first().text().trim();
+                    // The .dis_one_l sidebar also holds status and stats text; the username
+                    // is the first link inside it
+                    const author = $d('.dis_one_l a').first().text().trim();
                     // The list page only shows relative dates (e.g. "今天 21:20"), so take
                     // the absolute post time from the detail page header instead
                     const dateMatch = detailHtml.match(/发表于\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
