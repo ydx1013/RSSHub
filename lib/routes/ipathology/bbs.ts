@@ -85,15 +85,51 @@ async function handler(ctx: Context) {
                     const { data: detailHtml } = await got(item.link);
                     const $d = load(detailHtml);
 
-                    const $content = $d('.dis_text').first();
-                    $content.find('.hidden_bbs_detail_imgs, .album_slide_group').remove();
+                    $d('.hidden_bbs_detail_imgs, .album_slide_group').remove();
                     // Album thumbnails carry a @200w suffix; swap in the full-size image behind each link
-                    $content.find('img').each((_, img) => {
+                    $d('.dis_text img').each((_, img) => {
                         const href = $d(img).closest('a').attr('href');
                         if (href && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(href)) {
                             $d(img).attr('src', href);
                         }
                     });
+
+                    // Each floor is a .dis_one block; the first one is the main post
+                    const $content = $d('.dis_text').first();
+
+                    // Replies are the diagnosis gold on this forum, so append every
+                    // reply floor (author + floor/time + content) below the main post
+                    const replies = $d('div.dis_one')
+                        .toArray()
+                        .map((el) => {
+                            const $floor = $d(el);
+                            const $replyContent = $floor.find('.dis_one_r .dis_text').first();
+                            const rawMeta = $floor.find('.dis_sec_th dd').first().text().replace(/\s+/g, ' ').trim();
+                            if (!$replyContent.length || rawMeta.includes('楼主')) {
+                                return null;
+                            }
+                            // Keep only "N 楼 发表于 <time>", dropping trailing link texts (举报|引用)
+                            const metaMatch = rawMeta.match(/.*?发表于\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?/);
+                            if (!metaMatch) {
+                                return null;
+                            }
+                            const replyAuthor = $floor.find('.dis_one_l a').first().text().trim();
+                            return {
+                                author: replyAuthor,
+                                meta: metaMatch[0].replace('发表于', '发表于 ').trim(),
+                                html: $replyContent.html() ?? '',
+                            };
+                        })
+                        .filter((reply): reply is { author: string; meta: string; html: string } => reply !== null);
+
+                    const repliesHtml = replies.length
+                        ? `<hr><p><strong>${replies.length} 条回复</strong></p>${replies
+                              .map(
+                                  (reply) =>
+                                      `<div style="margin-top:10px;border-top:1px dashed #dddddd;padding-top:10px;"><p><strong>${reply.author}</strong> · ${reply.meta}</p>${reply.html}</div>`
+                              )
+                              .join('')}`
+                        : '';
 
                     const author = $d('.dis_one_l').first().text().trim();
                     // The list page only shows relative dates (e.g. "今天 21:20"), so take
@@ -102,7 +138,7 @@ async function handler(ctx: Context) {
 
                     return {
                         title: item.title,
-                        description: $content.html() ?? '',
+                        description: ($content.html() ?? '') + repliesHtml,
                         link: item.link,
                         author: author || undefined,
                         pubDate: dateMatch ? timezone(parseDate(dateMatch[1], 'YYYY-MM-DD HH:mm'), +8) : undefined,
