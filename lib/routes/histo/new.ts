@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import pMap from 'p-map';
 
+import { config } from '@/config';
 import type { Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
@@ -76,12 +77,28 @@ async function handler(ctx: Context) {
 
     const list = courses.slice(0, MAX_ITEMS);
 
+    // With HISTO_TOKEN/HISTO_USER_ID configured, use the authed endpoint so
+    // subscription-only courses also return video links; otherwise fall back
+    // to the public guest endpoint (public courses only).
+    const authed = Boolean(config.histo?.token && config.histo?.userId);
+    const courseUrl = (id: number) =>
+        authed ? `${API_BASE}/v4/${config.histo.userId}/course/${id}` : `${API_BASE}/0.1/guest/course/${id}`;
+    const courseHeaders = authed
+        ? {
+              token: config.histo.token as string,
+              userId: config.histo.userId as string,
+              flag: '1',
+          }
+        : {};
+
     // The upstream API throttles bursts (30 concurrent requests caused 504s), so limit concurrency.
     const items = await pMap(
         list,
         (course) =>
             cache.tryGet(`histo:course:${course.id}`, async () => {
-                const { data: detailResponse } = await got.get(`${API_BASE}/0.1/guest/course/${course.id}`);
+                const { data: detailResponse } = await got.get(courseUrl(course.id), {
+                    headers: courseHeaders,
+                });
                 const detail: CourseDetail = detailResponse.data ?? {};
 
                 // The video field is only returned for public courses (permissionType PUBLISHED);
@@ -102,7 +119,7 @@ async function handler(ctx: Context) {
                 if (videoUrl) {
                     descriptionParts.push(`<p>视频（HLS，PotPlayer/IINA/VLC 可直接播放）：<a href="${videoUrl}">${videoUrl}</a></p>`);
                 } else {
-                    descriptionParts.push('<p>（订阅课程，视频需登录观看）</p>');
+                    descriptionParts.push('<p>（暂无视频链接，可能需要登录订阅后观看）</p>');
                 }
 
                 const coverPath = detail.cover?.filepath;

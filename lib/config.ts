@@ -132,6 +132,8 @@ type ConfigEnvKeys =
     | 'GUOZAOKE_COOKIES'
     | 'HEFENG_KEY'
     | 'HEFENG_API_HOST'
+    | 'HISTO_TOKEN'
+    | 'HISTO_USER_ID'
     | 'HUITUN_COOKIE'
     | 'INFZM_COOKIE'
     | 'INITIUM_MEMBER_COOKIE'
@@ -477,6 +479,10 @@ export type Config = {
     hefeng: {
         key?: string;
         apiHost?: string;
+    };
+    histo: {
+        token?: string;
+        userId?: string;
     };
     huitun: {
         cookie?: string;
@@ -1012,6 +1018,10 @@ const calculateValue = () => {
         hefeng: {
             key: envs.HEFENG_KEY,
             apiHost: envs.HEFENG_API_HOST,
+        },
+        histo: {
+            token: envs.HISTO_TOKEN,
+            userId: envs.HISTO_USER_ID,
         },
         huitun: {
             cookie: envs.HUITUN_COOKIE,
