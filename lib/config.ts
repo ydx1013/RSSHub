@@ -249,6 +249,7 @@ type ConfigEnvKeys =
     | 'XUEQIU_COOKIES'
     | 'YAMIBO_SALT'
     | 'YAMIBO_AUTH'
+    | 'YNSD_OA_COOKIE'
     | 'YOUTUBE_KEY'
     | 'YOUTUBE_CLIENT_ID'
     | 'YOUTUBE_CLIENT_SECRET'
@@ -725,6 +726,9 @@ export type Config = {
     yamibo: {
         salt?: string;
         auth?: string;
+    };
+    ynsd: {
+        oa_cookie?: string;
     };
     youtube: {
         key?: string;
@@ -1264,6 +1268,9 @@ const calculateValue = () => {
         yamibo: {
             salt: envs.YAMIBO_SALT,
             auth: envs.YAMIBO_AUTH,
+        },
+        ynsd: {
+            oa_cookie: envs.YNSD_OA_COOKIE,
         },
         youtube: {
             key: envs.YOUTUBE_KEY,
