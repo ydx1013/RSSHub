@@ -13,7 +13,12 @@ const BASE = 'https://ynsdyrmyy.drp100.cn:7071';
 const API_LIST = `${BASE}/api/zgyt/sys/portal/datasource/infoContentList`;
 const API_DETAIL = `${BASE}/api/zgyt/info/template/content?contentId=`;
 
-const headers = () => ({ Cookie: `Authorization=${config.ynsd.oa_cookie}` });
+// Browser-like UA: the OA origin/WAF returns 520 to bare clients and blocks overseas datacenter IPs
+const headers = () => ({
+    Cookie: `Authorization=${config.ynsd.oa_cookie}`,
+    'User-Agent': config.trueUA,
+    Referer: `${BASE}/`,
+});
 
 async function listChannel(id: string, size: number): Promise<any[]> {
     const resp = await got.post(API_LIST, {
@@ -68,28 +73,30 @@ export const route: Route = {
         const channels = await resolveChannels(id);
         const perChannel = Math.max(5, Math.ceil(40 / channels.length) || 10);
 
-        const rows = (await Promise.all(channels.map((c) => listChannel(c, perChannel))))
-            .flat()
-            .filter((it, i, arr) => arr.findIndex((x) => x.id === it.id) === i);
-        rows.sort((a: any, b: any) => (a.createDate < b.createDate ? 1 : -1));
+        // sequential fetches: keep subrequests under the Workers free-plan limit (50) and avoid WAF burst triggers
+        const rows: any[] = [];
+        for (const c of channels) {
+            rows.push(...(await listChannel(c, perChannel)));
+        }
+        const deduped = rows.filter((it, i, arr) => arr.findIndex((x) => x.id === it.id) === i);
+        deduped.sort((a: any, b: any) => (a.createDate < b.createDate ? 1 : -1));
 
-        const items = await Promise.all(
-            rows.slice(0, 60).map(async (row: any) => {
-                const link = API_DETAIL + row.id;
-                // detail endpoint returns server-rendered HTML, use it as the description body
-                const detail = await got(link, { headers: headers() });
-                const $ = load(detail.data);
-                $('script, style, link, meta').remove();
-                return {
-                    title: String(row.title),
-                    link,
-                    guid: `ynsdyrmyy:${row.id}`,
-                    description: $('body').html() || row.description || '',
-                    pubDate: row.createDate ? parseDate(row.createDate) : undefined,
-                    category: [row.channelName],
-                };
-            })
-        );
+        const items = [];
+        for (const row of deduped.slice(0, 30)) {
+            const link = API_DETAIL + row.id;
+            // detail endpoint returns server-rendered HTML, use it as the description body
+            const detail = await got(link, { headers: headers() });
+            const $ = load(detail.data);
+            $('script, style, link, meta').remove();
+            items.push({
+                title: String(row.title),
+                link,
+                guid: `ynsdyrmyy:${row.id}`,
+                description: $('body').html() || row.description || '',
+                pubDate: row.createDate ? parseDate(row.createDate) : undefined,
+                category: [row.channelName],
+            });
+        }
 
         return {
             title: `云南省第一人民医院 OA - ${id === 'all' ? '全站' : id}`,
