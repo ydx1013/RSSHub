@@ -3,6 +3,9 @@ main = "dist-worker/worker.mjs"
 compatibility_date = "2026-09-01"
 compatibility_flags = ["global_fetch_strictly_public"]
 
+# Keep dashboard-configured vars across deploys; secrets are never deleted anyway.
+keep_vars = true
+
 find_additional_modules = true
 base_dir = "dist-worker/modules"
 rules = [{ type = "Data", globs = ["data_files/**"], fallthrough = true }]
